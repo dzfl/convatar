@@ -3,6 +3,10 @@
 require 'net/http'
 require 'pit'
 require 'shared-mime-info'
+require 'xmlrpc/client'
+require 'base64'
+require 'digest/md5'
+require 'httpclient'
 
 
 class Convatar
@@ -15,6 +19,58 @@ class Convatar
 
 	def run
 		twitter
+		#gravatar
+		hatena
+	end
+
+	# hatena.ne.jp
+	def hatena
+		config = Pit.get("hatena.ne.jp", :require => {
+			'username' => "your username in hatena",
+			'password' => "your password in hatena",
+		})
+		c = HTTPClient.new
+		c.debug_dev=STDOUT
+
+		# login
+		body = { 'name' => config['username'], 'password' => config['password'] }
+		res = c.post('https://www.hatena.ne.jp/login', body)
+
+		# delete
+		body = { 'delete_profile_image' => 1 }
+		res = c.post("https://www.hatena.ne.jp/#{config['username']}/config/profile", body)
+
+		# upload
+		body = { 'profile_image' => @image }
+		res = c.post("https://www.hatena.ne.jp/#{config['username']}/config/profile", body)
+
+	end
+
+	# don't run
+	def gravatar
+		config = Pit.get("gravatar.com", :require => {
+			'email'    => "your username in gravatar",
+			'password' => "your password in gravatar",
+		})
+
+		mailhash = Digest::MD5.hexdigest( config["email"].strip.downcase )
+		base64 = XMLRPC::Base64.new(@image.readlines.join(''))
+
+		filehash = {
+			:name => @filename,
+			:bits => base64
+		}
+
+		server = XMLRPC::Client.new3("host"=>"secure.gravatar.com", "path"=>"/xmlrpc?user=#{mailhash}", "use_ssl"=>true)
+		begin
+			#res = server.call2("grav.saveData", { "data" => filehash, "rating" => 0, "password" => config['password'] })
+			res = server.call("grav.saveData", { "data" => base64, "rating" => 0, "password" => config['password'] })
+			#res = server.call("grav.userimages", { "password" => config['password'] })
+		rescue XMLRPC::FaultException => e
+			p e.faultCode
+			p e.faultString
+		end
+		puts res
 	end
 
 	def twitter
@@ -36,7 +92,7 @@ class Convatar
 
 		Net::HTTP.new(url.host, url.port).start do |http| 
 			req = Net::HTTP::Post.new(url.request_uri)
-			req.basic_auth(config["username"], config["password"])
+			req.basic_auth(config['username'], config['password'])
 			req.content_type="multipart/form-data; boundary=#{boundary}"
 			req.body=body
 			res = http.request(req)
